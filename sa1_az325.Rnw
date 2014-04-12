@@ -1,0 +1,46 @@
+\documentclass[11pt]{article}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{fullpage}
+\usepackage{subcaption}
+\usepackage{hyperref}
+
+\author{Argyris Zardilis\\ \texttt{az325@cam.ac.uk}}
+\title{Population Genetic Analyses of Genomic Data: Assignment 1}
+
+\bibliographystyle{unsrt}
+
+\begin{document}
+
+
+<<env, echo=FALSE, results='hide', message=FALSE, cache=FALSE>>=
+set.seed(0)
+setwd("../src")
+read_chunk('hmm.R')
+read_chunk('markov.R')
+opts_chunk$set(fig.align = 'center',
+               tidy = FALSE)
+@
+
+\nocite{*}
+
+\maketitle
+
+<<MarkovGen>>=
+@
+
+\begin{figure}[!ht]
+<<markovTest, echo=FALSE, fig.height=5, gif.width=5>>=
+print(getwd())
+out.states <- MarkovTest()
+plot(out.states)
+@
+
+\caption{States output by the Markov chain model with parameters}
+\label{fig:markovOut}
+\end{figure}
+
+
+\bibliography{sa1_az325}
+\end{document}
