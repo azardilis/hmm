@@ -43,9 +43,9 @@ ReadModel <- function(trans.f, init.f, emit.f) {
 
 TestHMM <- function() {
     N <- 115
-    trans.f <- "data/trans.dat"
-    init.f <- "data/start_hmm1.dat"
-    emit.f <- "data/emit1.dat"
+    trans.f <- "data/trans_hmm.dat"
+    init.f <- "data/start_hmm.dat"
+    emit.f <- "data/emit.dat"
     model <- ReadModel(trans.f, init.f, emit.f)
 
     out <- HMMGen(model$A, model$B, model$istart, N)
@@ -113,7 +113,6 @@ CalcForward <- function(y, A, B, istart) {
     pf <- pf / sf
     asf[1] <- sf
     aft[1, ] <- pf
-
     for (i in 2:length(y)) {
         nf <- sapply(state.space, function(x) {UpdateForward(pf, A, B, x, y[i])})
         sf <- sum(nf)
@@ -265,7 +264,7 @@ BaumWelch <- function(y, n.states, n.symb, max.iter, A, B, eps = 0.01) {
     #pick arbitrary model parameters A, B, istart
     up <- 1 / n.states
     #A <- matrix(rep(up, n.states**2), nrow=n.states)
-    #A <- matrix(c(0.8, 0.2, 0.1, 0.9), nrow=2, byrow = T)
+    #B <- matrix(rep(up, n.states**2), nrow=n.states)
     #B <- PickInitEmission(y, n.states, n.symb)
     istart <- rep(up, n.states)
     L1 <- CalcForward(y, A, B, istart)$L
@@ -280,7 +279,7 @@ BaumWelch <- function(y, n.states, n.symb, max.iter, A, B, eps = 0.01) {
         upd.res <- UpdateTransition(A, B, aft, abt, y)
         A <- upd.res$nA
         B <- UpdateEmission(A, B, aft, abt, y, upd.res$G)
-        #istart <- UpdateStart(A, B, aft, abt, y)
+        istart <- UpdateStart(A, B, aft, abt, y)
         L1 <- CalcForward(y, A, B, istart)$L
         print(L1)
         dL <- L1 - L0
@@ -288,19 +287,6 @@ BaumWelch <- function(y, n.states, n.symb, max.iter, A, B, eps = 0.01) {
     }
 
     return((list(A=A, B=B, istart=istart)))
-
-
-    ## for (i in 1:50) {
-    ##     f.res <- CalcForward(y, A, B, istart)
-    ##     print(f.res$L)
-    ##     abt <- CalcBackward(y, A, B)
-    ##     aft <- f.res$aft
-
-    ##     A <- UpdateTransition(list(A=A, B=B, istart=istart), aft, abt, y, 2)
-    ##     B <- UpdateEmission(list(A=A, B=B, istart=istart), aft, abt, y)
-    ##     istart <- UpdateStart(list(A=A, B=B, istart=istart), aft, abt, y, 2)
-    ## }
-    ## return(list(A=A, B=B, istart=istart))
 }
 
 UpdateViterbi <- function(v, A, B, yi, s) {
