@@ -228,6 +228,88 @@ UpdateEmissionMatrix <- function(B, aft, abt, y, L) {
     return(nB)
 }
 
+ksi <- function(m, i, j, A, B, aft, abt, y) {
+    # Calculate ksi var for transition i->j
+    # at time m
+    nf <- sum(aft[m, ] * abt[m, ])
+    k <- (aft[m, i]*abt[m+2, j]*B[j, y[m+1]]*A[i, j]) / nf
+
+    return(k)
+}
+
+gammaH <- function(m, i, A, B, aft, abt, y, k) {
+    return(sum(sapply(1:k, function(x) {ksi(m, i, x, A, B, aft, abt, y)})))
+}
+
+updateA <- function(model, aft, abt, y, k) {
+    A1 <- matrix(c(0, 0, 0, 0), nrow=2)
+    for (i in 1:nrow(model$A)) {
+        for (j in 1:n(model$A)) {
+            ksiij <- sum(sapply(1:(length(y)-2), function(x) {ksi(x, i, j,model$A,
+                                                                  model$B, aft,
+                                                                  abt, y)}))
+            gammaij <- sum(sapply(1:(length(y)-2), function(x) {gammaH(x, i, model$A,
+                                                                       model$B,
+                                                                       aft, abt, y, 2)}))
+            A1[i, j] <- ksiij / gammaij
+        }
+    }
+
+    return(A1)
+}
+
+updateStart <- function(model, aft, abt, y, k) {
+    start <- sapply(1:k, function(x) {gammaH(0, x, model$A, model$B, aft, abt, y, k)})
+
+    return(start)
+}
+
+updateB <- function(model, aft, abt, y) {
+    B1 <- matrix(rep(0, 2*5), nrow=2)
+    for (j in 1:2) {
+        for (n in 1:5) {
+            id <- rep(0, length(y)-2)
+            eq <- which(y[1:(length(y)-2)] == n)
+            id[eq] <- 1
+            gni <- sapply(1:(length(y)-2), function(x) {gammaH(x, j, model$A, model$B,
+                                                               aft, abt,
+                                                               y, 2)})
+            B1[j, n] <- sum(gni * id)
+        }
+    }
+
+    ni <- rowSums(B1)
+    for (j in 1:nrow(B1)) {
+        B1[j, ] <- B1[j, ] / ni[j]
+    }
+
+    return(B1)
+}
+
+
+A <- model$A
+B <- model$B
+istart <- model$istart
+for (i in 1:50) {
+    f.res <- CalcForward(y, A, B, istart)
+    print(f.res$L)
+    abt <- CalcBackward(y, A, B)
+    aft <- f.res$aft
+
+    A <- updateA(list(A=A, B=B, istart=istart), aft, abt, y, 2)
+    B <- updateB(list(A=A, B=B, istart=istart), aft, abt, y)
+}
+
+
+istart <- updateStart(list(A=A, B=B, istart=istart), aft, abt, y, 2)
+
+
+
+
+
+
+
+
 BaumWelch <- function(y, max.iter, A, B, istart) {
     # y observation
     # max.iter maximum number of iterations before stopping
