@@ -67,6 +67,18 @@ PlotOut <- function(out) {
            col = 1:(ncol(states)-1), lty=ltyp)
 }
 
+PlotContent <- function(vhs, content) {
+    T <- 1:length(content)
+    dat <- as.matrix(cbind(hs, cg))
+
+    ltyp <- rep("solid", ncol(dat)-1)
+    matplot(T, dat, type='l', ylab='State index',
+            xlab = 'time', lwd=2, lty = ltyp)
+
+    legend("topright", c("Hidden States", "GC content(%)"),
+           col = 1:(ncol(dat)-1), lty=ltyp)
+}
+
 
 
 UpdateForward <- function(f, A, B, s, yi) {
@@ -164,70 +176,6 @@ TestLikelihood <- function() {
     return(f.res)
 }
 
-UpdateTransition <- function(A, B, y, aft, abt, s1, s2, L) {
-    aft1 <- aft[1:(nrow(aft)-1), ]
-    abt1 <- abt[2:(nrow(abt)), ]
-    y1 <- y[2:length(y)]
-
-    nt <- sum(aft1*abt1*A[s1, s2]*B[s2, y1])
-
-    return(nt/L)
-}
-
-UpdateTransitionMatrix <- function(A, B, aft, abt, y, L) {
-    # Returns:
-    # nA new transition matrix
-
-    nA <- matrix(rep(0, length(A)), nrow=nrow(model$A))
-    state.space <- 1:nrow(A)
-
-    for (i in state.space) {
-        for (k in state.space) {
-            nA[i, k] <- UpdateTransition(A, B, y, aft, abt, i, k, L)
-        }
-    }
-
-    ni <- rowSums(nA)
-    for (j in 1:nrow(nA)) {
-        nA[j, ] <- nA[j, ] / ni[j]
-    }
-
-    return(nA)
-}
-
-UpdateEmission <- function(abt, aft, y, s, yi, L) {
-    id <- rep(0, length(y))
-    eq <- which(y == yi)
-    neq <- setdiff(1:length(y), eq)
-    id[eq] <- 1
-    id[neq] <- 0
-
-    ne <- sum(id * abt[, s] * aft[, s])
-
-    return(ne/L)
-}
-
-UpdateEmissionMatrix <- function(B, aft, abt, y, L) {
-    # Returns:
-    # nB   new emission matrix
-    nB <- matrix(rep(0, nrow(B)*ncol(B)), nrow=nrow(B))
-
-    for (i in 1:nrow(nB)) {
-        for (k in 1:ncol(nB)) {
-            # i:state, k:symbol
-            nB[i, k] <- UpdateEmission(abt, aft, y, i, k, L)
-        }
-    }
-
-    #normalise, basically make probabilities out of counts
-    ni <- rowSums(nB)
-    for (j in 1:nrow(nB)) {
-        nB[j, ] <- nB[j, ] / ni[j]
-    }
-
-    return(nB)
-}
-
 ksi <- function(m, i, j, A, B, aft, abt, y) {
     # Calculate ksi var for transition i->j
     # at time m
@@ -244,13 +192,14 @@ gammaH <- function(m, i, A, B, aft, abt, y, k) {
 updateA <- function(model, aft, abt, y, k) {
     A1 <- matrix(c(0, 0, 0, 0), nrow=2)
     for (i in 1:nrow(model$A)) {
-        for (j in 1:n(model$A)) {
+        gammaij <- sum(sapply(1:(length(y)-2), function(x) {gammaH(x, i, model$A,
+                                                                   model$B,
+                                                                   aft, abt, y, 2)}))
+        for (j in 1:nrow(model$A)) {
             ksiij <- sum(sapply(1:(length(y)-2), function(x) {ksi(x, i, j,model$A,
                                                                   model$B, aft,
                                                                   abt, y)}))
-            gammaij <- sum(sapply(1:(length(y)-2), function(x) {gammaH(x, i, model$A,
-                                                                       model$B,
-                                                                       aft, abt, y, 2)}))
+
             A1[i, j] <- ksiij / gammaij
         }
     }
@@ -259,21 +208,22 @@ updateA <- function(model, aft, abt, y, k) {
 }
 
 updateStart <- function(model, aft, abt, y, k) {
-    start <- sapply(1:k, function(x) {gammaH(0, x, model$A, model$B, aft, abt, y, k)})
-
+    start <- sapply(1:k, function(x) {gammaH(1, x, model$A, model$B, aft, abt, y, k)})
+    start <- start / sum(start)
     return(start)
 }
 
 updateB <- function(model, aft, abt, y) {
     B1 <- matrix(rep(0, 2*5), nrow=2)
     for (j in 1:2) {
+        gni <- sapply(1:(length(y)-2), function(x) {gammaH(x, j, model$A, model$B,
+                                                               aft, abt,
+                                                               y, 2)})
         for (n in 1:5) {
             id <- rep(0, length(y)-2)
             eq <- which(y[1:(length(y)-2)] == n)
             id[eq] <- 1
-            gni <- sapply(1:(length(y)-2), function(x) {gammaH(x, j, model$A, model$B,
-                                                               aft, abt,
-                                                               y, 2)})
+
             B1[j, n] <- sum(gni * id)
         }
     }
@@ -287,55 +237,20 @@ updateB <- function(model, aft, abt, y) {
 }
 
 
-A <- model$A
-B <- model$B
-istart <- model$istart
-for (i in 1:50) {
-    f.res <- CalcForward(y, A, B, istart)
-    print(f.res$L)
-    abt <- CalcBackward(y, A, B)
-    aft <- f.res$aft
-
-    A <- updateA(list(A=A, B=B, istart=istart), aft, abt, y, 2)
-    B <- updateB(list(A=A, B=B, istart=istart), aft, abt, y)
-}
-
-
-istart <- updateStart(list(A=A, B=B, istart=istart), aft, abt, y, 2)
-
-
-
-
-
-
-
-
-BaumWelch <- function(y, max.iter, A, B, istart) {
-    # y observation
-    # max.iter maximum number of iterations before stopping
-    #
-    # Returns:
-    # A, B, istart  updated parameters
-
-    # start by picking arbitrary parameters A, B, istart
-    # for now take the A, B and istart given in the sheet
-    f.res <- CalcForward(y, A, B, istart)
-    print(f.res$L)
-    for (i in 1:max.iter) {
-        # at each iteration calculate aft, abt from A, B, istart
-        # update A, B with UpdateEmissionMatrix, UpdateTransitionMatrix functions
-        # repeat
+BW <- function(model) {
+    A <- model$A
+    B <- model$B
+    istart <- model$istart
+    for (i in 1:50) {
         f.res <- CalcForward(y, A, B, istart)
+        print(f.res$L)
         abt <- CalcBackward(y, A, B)
         aft <- f.res$aft
 
-        A <- UpdateTransitionMatrix(A, B, aft, abt, y, f.res$L)
-        B <- UpdateEmissionMatrix(B, aft, abt, y, f.res$L)
-
-        f.res <- CalcForward(y, A, B, istart)
-        print(f.res$L)
+        A <- updateA(list(A=A, B=B, istart=istart), aft, abt, y, 2)
+        B <- updateB(list(A=A, B=B, istart=istart), aft, abt, y)
+        istart <- updateStart(list(A=A, B=B, istart=istart), aft, abt, y, 2)
     }
-
     return(list(A=A, B=B, istart=istart))
 }
 
