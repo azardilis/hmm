@@ -43,9 +43,9 @@ ReadModel <- function(trans.f, init.f, emit.f) {
 
 TestHMM <- function() {
     N <- 115
-    trans.f <- "data/trans_hmm.dat"
-    init.f <- "data/start_hmm.dat"
-    emit.f <- "data/emit.dat"
+    trans.f <- "data/trans.dat"
+    init.f <- "data/start_hmm1.dat"
+    emit.f <- "data/emit1.dat"
     model <- ReadModel(trans.f, init.f, emit.f)
 
     out <- HMMGen(model$A, model$B, model$istart, N)
@@ -176,7 +176,7 @@ TestLikelihood <- function() {
     return(f.res)
 }
 
-ksi <- function(m, i, j, A, B, aft, abt, y) {
+Ksi <- function(m, i, j, A, B, aft, abt, y) {
     # Calculate ksi var for transition i->j
     # at time m
     nf <- sum(aft[m, ] * abt[m, ])
@@ -185,73 +185,122 @@ ksi <- function(m, i, j, A, B, aft, abt, y) {
     return(k)
 }
 
-gammaH <- function(m, i, A, B, aft, abt, y, k) {
-    return(sum(sapply(1:k, function(x) {ksi(m, i, x, A, B, aft, abt, y)})))
+GammaH <- function(m, i, A, B, aft, abt, y) {
+    n.states <- nrow(A)
+    return(sum(sapply(1:n.states, function(x) {Ksi(m, i, x, A, B, aft, abt, y)})))
 }
 
-updateA <- function(model, aft, abt, y, k) {
-    A1 <- matrix(c(0, 0, 0, 0), nrow=2)
-    for (i in 1:nrow(model$A)) {
-        gammaij <- sum(sapply(1:(length(y)-2), function(x) {gammaH(x, i, model$A,
-                                                                   model$B,
-                                                                   aft, abt, y, 2)}))
-        for (j in 1:nrow(model$A)) {
-            ksiij <- sum(sapply(1:(length(y)-2), function(x) {ksi(x, i, j,model$A,
-                                                                  model$B, aft,
-                                                                  abt, y)}))
+UpdateTransition <- function(A, B, aft, abt, y) {
+    n.states <- nrow(A)
+    n.obs <- length(y)
+    nA <- matrix(rep(0, n.states*n.states), nrow=n.states)
+    G <- rep(0, n.states)
 
-            A1[i, j] <- ksiij / gammaij
+    for (i in 1:n.states) {
+        gammaij <- sum(sapply(1:(n.obs-2), function(m) {GammaH(m, i, A, B, aft,
+                                                               abt, y)}))
+        G[i] <- gammaij
+        for (j in 1:n.states) {
+            ksiij <- sum(sapply(1:(length(y)-2), function(m) {Ksi(m, i, j, A,
+                                                                  B, aft,
+                                                                  abt, y)}))
+            nA[i, j] <- ksiij / gammaij
         }
     }
 
-    return(A1)
+    return(list(nA=nA, G=G))
 }
 
-updateStart <- function(model, aft, abt, y, k) {
-    start <- sapply(1:k, function(x) {gammaH(1, x, model$A, model$B, aft, abt, y, k)})
+UpdateStart <- function(A, B, aft, abt, y) {
+    n.states <- nrow(A)
+    start <- sapply(1:n.states, function(x) {GammaH(1, x, A, B, aft, abt, y)})
     start <- start / sum(start)
+
     return(start)
 }
 
-updateB <- function(model, aft, abt, y) {
-    B1 <- matrix(rep(0, 2*5), nrow=2)
-    for (j in 1:2) {
-        gni <- sapply(1:(length(y)-2), function(x) {gammaH(x, j, model$A, model$B,
-                                                               aft, abt,
-                                                               y, 2)})
-        for (n in 1:5) {
-            id <- rep(0, length(y)-2)
-            eq <- which(y[1:(length(y)-2)] == n)
+UpdateEmission <- function(A, B, aft, abt, y, G) {
+    n.states <- nrow(A)
+    n.obs <- length(y)
+    n.symb <- ncol(B)
+
+    nB <- matrix(rep(0, n.states*n.symb), nrow=n.states)
+
+    for (j in 1:n.states) {
+        gni <- sapply(1:(n.obs-2), function(x) {GammaH(x, j, A, B, aft, abt, y)})
+        for (n in 1:n.symb) {
+            id <- rep(0, n.obs-2)
+            eq <- which(y[1:(n.obs-2)] == n)
             id[eq] <- 1
 
-            B1[j, n] <- sum(gni * id)
+            nB[j, n] <- sum(gni * id)
         }
     }
 
-    ni <- rowSums(B1)
-    for (j in 1:nrow(B1)) {
-        B1[j, ] <- B1[j, ] / ni[j]
+    ni <- rowSums(nB)
+    for (j in 1:nrow(nB)) {
+        nB[j, ] <- nB[j, ] / ni[j]
     }
 
-    return(B1)
+    return(nB)
 }
 
+PickInitEmission <- function(y, n.states, n.symb) {
+    B <- matrix(rep(0, n.states*n.symb), nrow=n.states)
 
-BW <- function(model) {
-    A <- model$A
-    B <- model$B
-    istart <- model$istart
-    for (i in 1:50) {
-        f.res <- CalcForward(y, A, B, istart)
-        print(f.res$L)
-        abt <- CalcBackward(y, A, B)
-        aft <- f.res$aft
-
-        A <- updateA(list(A=A, B=B, istart=istart), aft, abt, y, 2)
-        B <- updateB(list(A=A, B=B, istart=istart), aft, abt, y)
-        istart <- updateStart(list(A=A, B=B, istart=istart), aft, abt, y, 2)
+    kres <- kmeans(y, n.states)
+    print(kres$centers)
+    for (i in 1:n.states) {
+        cl <- y[which(kres$cluster == i)]
+        p <- table(cl) / sum(table(cl))
+        B[i, as.integer(names(p))] <- p
     }
-    return(list(A=A, B=B, istart=istart))
+
+    return(B)
+}
+
+BaumWelch <- function(y, n.states, n.symb, max.iter, A, B, eps = 0.01) {
+    n.iter <- 0
+    L0 <- 0
+    #pick arbitrary model parameters A, B, istart
+    up <- 1 / n.states
+    #A <- matrix(rep(up, n.states**2), nrow=n.states)
+    #A <- matrix(c(0.8, 0.2, 0.1, 0.9), nrow=2, byrow = T)
+    #B <- PickInitEmission(y, n.states, n.symb)
+    istart <- rep(up, n.states)
+    L1 <- CalcForward(y, A, B, istart)$L
+    dL <- L1 - L0
+
+    while(abs(dL) > eps &&
+          n.iter < max.iter) {
+        L0 <- L1
+        aft <- CalcForward(y, A, B, istart)$aft
+        abt <- CalcBackward(y, A, B)
+
+        upd.res <- UpdateTransition(A, B, aft, abt, y)
+        A <- upd.res$nA
+        B <- UpdateEmission(A, B, aft, abt, y, upd.res$G)
+        #istart <- UpdateStart(A, B, aft, abt, y)
+        L1 <- CalcForward(y, A, B, istart)$L
+        print(L1)
+        dL <- L1 - L0
+        n.iter <- n.iter + 1
+    }
+
+    return((list(A=A, B=B, istart=istart)))
+
+
+    ## for (i in 1:50) {
+    ##     f.res <- CalcForward(y, A, B, istart)
+    ##     print(f.res$L)
+    ##     abt <- CalcBackward(y, A, B)
+    ##     aft <- f.res$aft
+
+    ##     A <- UpdateTransition(list(A=A, B=B, istart=istart), aft, abt, y, 2)
+    ##     B <- UpdateEmission(list(A=A, B=B, istart=istart), aft, abt, y)
+    ##     istart <- UpdateStart(list(A=A, B=B, istart=istart), aft, abt, y, 2)
+    ## }
+    ## return(list(A=A, B=B, istart=istart))
 }
 
 UpdateViterbi <- function(v, A, B, yi, s) {
