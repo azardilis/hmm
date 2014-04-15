@@ -1,0 +1,11 @@
+* make BaumWelch function more presentable
+** replace 'magic' numbers with uniform probs
+** add another stopping condition for dL(difference in likelihood)
+
+* suggestion for alternative emission distribution
+** experiment with binomials, normal approximations to it
+** read paper about possible parameterisations(p of Binomial coming from normal based on
+state
+** possible parameter estimation schemes?
+
+
