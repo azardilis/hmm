@@ -124,7 +124,7 @@ CalcForward <- function(y, A, B, istart) {
 
     L <- sum(log(asf))
 
-    return(list(aft=aft, L=L))
+    return(list(aft=aft, asf=asf, L=L))
 }
 
 UpdateBackward <- function(b, A, B, s, yi) {
@@ -134,7 +134,7 @@ UpdateBackward <- function(b, A, B, s, yi) {
     return(nb)
 }
 
-CalcBackward <- function(y, A, B) {
+CalcBackward <- function(y, A, B, asf) {
     # y  observations
     # A, B an HMM
     #
@@ -152,7 +152,7 @@ CalcBackward <- function(y, A, B) {
 
     for (i in (length(y)-1):1) {
         nb <- sapply(state.space, function(x) {UpdateBackward(pb, A, B, x, y[i+1])})
-        nb <- nb / sum(nb)
+        nb <- nb / asf[i+1]
         abt[i, ] <- nb
         pb <- nb
     }
@@ -164,7 +164,7 @@ TestLikelihood <- function() {
     obs <- as.matrix(read.table("data/dsCG.dat"))
     obs <- as.vector(obs)
 
-    trans.f <- "data/trans_hmm.dat"
+    ptrans.f <- "data/trans_hmm.dat"
     init.f <- "data/start_hmm.dat"
     emit.f <- "data/emit.dat"
     model <- ReadModel(trans.f, init.f, emit.f)
@@ -175,118 +175,64 @@ TestLikelihood <- function() {
     return(f.res)
 }
 
-Ksi <- function(m, i, j, A, B, aft, abt, y) {
-    # Calculate ksi var for transition i->j
-    # at time m
-    nf <- sum(aft[m, ] * abt[m, ])
-    k <- (aft[m, i]*abt[m+2, j]*B[j, y[m+1]]*A[i, j]) / nf
-
-    return(k)
-}
-
-GammaH <- function(m, i, A, B, aft, abt, y) {
+updateParams <- function(A, B, aft, abt) {
     n.states <- nrow(A)
-    return(sum(sapply(1:n.states, function(x) {Ksi(m, i, x, A, B, aft, abt, y)})))
-}
-
-UpdateTransition <- function(A, B, aft, abt, y) {
-    n.states <- nrow(A)
-    n.obs <- length(y)
-    nA <- matrix(rep(0, n.states*n.states), nrow=n.states)
-    G <- rep(0, n.states)
-
-    for (i in 1:n.states) {
-        gammaij <- sum(sapply(1:(n.obs-2), function(m) {GammaH(m, i, A, B, aft,
-                                                               abt, y)}))
-        G[i] <- gammaij
-        for (j in 1:n.states) {
-            ksiij <- sum(sapply(1:(length(y)-2), function(m) {Ksi(m, i, j, A,
-                                                                  B, aft,
-                                                                  abt, y)}))
-            nA[i, j] <- ksiij / gammaij
-        }
-    }
-
-    return(list(nA=nA, G=G))
-}
-
-UpdateStart <- function(A, B, aft, abt, y) {
-    n.states <- nrow(A)
-    start <- sapply(1:n.states, function(x) {GammaH(1, x, A, B, aft, abt, y)})
-    start <- start / sum(start)
-
-    return(start)
-}
-
-UpdateEmission <- function(A, B, aft, abt, y, G) {
-    n.states <- nrow(A)
-    n.obs <- length(y)
     n.symb <- ncol(B)
+    A1 <- matrix(rep(0, n.states**2), nrow=n.states)
+    p.seq <- sum(aft[1, ] * abt[1, ])
 
-    nB <- matrix(rep(0, n.states*n.symb), nrow=n.states)
-
-    for (j in 1:n.states) {
-        gni <- sapply(1:(n.obs-2), function(x) {GammaH(x, j, A, B, aft, abt, y)})
-        for (n in 1:n.symb) {
-            id <- rep(0, n.obs-2)
-            eq <- which(y[1:(n.obs-2)] == n)
-            id[eq] <- 1
-
-            nB[j, n] <- sum(gni * id)
+    for (i in 1:n.states) {
+        for (j in 1:n.states) {
+            r <- sapply(1:(length(y)-2), function(t) {aft[t, i]*B[j, y[t+1]]*A[i, j]*
+                                                          abt[t+2, j] })
+            A1[i, j] <- sum(r) / p.seq
         }
     }
 
-    ni <- rowSums(nB)
-    for (j in 1:nrow(nB)) {
-        nB[j, ] <- nB[j, ] / ni[j]
-    }
+    A1 <- A1 / rowSums(A1)
 
-    return(nB)
-}
-
-PickInitEmission <- function(y, n.states, n.symb) {
-    B <- matrix(rep(0, n.states*n.symb), nrow=n.states)
-
-    kres <- kmeans(y, n.states)
-    print(kres$centers)
+    B1 <- matrix(rep(0, n.states*n.symb), nrow=n.states)
     for (i in 1:n.states) {
-        cl <- y[which(kres$cluster == i)]
-        p <- table(cl) / sum(table(cl))
-        B[i, as.integer(names(p))] <- p
+        gmi <- rep(0, length(y)-2)
+        for (t in 1:(length(y)-2)){
+            gm <- sum(sapply(1:n.states, function(j) {aft[t, i]*B[j, y[t+1]]*A[i, j]*
+                                                          abt[t+2, j]}))
+            gmi[t] <- gm
+        }
+        denom <- sum(gmi)
+        for (k in 1:n.symb) {
+            id <- rep(0, length(y)-2)
+            eq <- which(y[1:(length(y)-2)] == k)
+            id[eq] <- 1
+            B1[i, k] <- sum(gmi * id) / denom
+        }
     }
 
-    return(B)
+    return(list(A=A1, B=B1))
 }
 
-BaumWelch <- function(y, n.states, n.symb, max.iter, A, B, eps = 0.01) {
-    n.iter <- 0
-    L0 <- 0
-    #pick arbitrary model parameters A, B, istart
-    up <- 1 / n.states
-    #A <- matrix(rep(up, n.states**2), nrow=n.states)
-    #B <- matrix(rep(up, n.states**2), nrow=n.states)
-    #B <- PickInitEmission(y, n.states, n.symb)
-    istart <- rep(up, n.states)
-    L1 <- CalcForward(y, A, B, istart)$L
-    dL <- L1 - L0
+BaumWelch <- function(y, n.states, n.symb, max.iter) {
+    A <- matrix(abs(rnorm(n.states**2, 0.5, 0.2)), nrow=n.states)
+    A <- A / rowSums(A)
 
-    while(abs(dL) > eps &&
-          n.iter < max.iter) {
-        L0 <- L1
-        aft <- CalcForward(y, A, B, istart)$aft
-        abt <- CalcBackward(y, A, B)
+    B <- matrix(abs(rnorm(n.symb*n.states, 0.2, 0.2)), nrow=n.states)
+    B <- B / rowSums(B)
 
-        upd.res <- UpdateTransition(A, B, aft, abt, y)
-        A <- upd.res$nA
-        B <- UpdateEmission(A, B, aft, abt, y, upd.res$G)
-        istart <- UpdateStart(A, B, aft, abt, y)
-        L1 <- CalcForward(y, A, B, istart)$L
-        print(L1)
-        dL <- L1 - L0
-        n.iter <- n.iter + 1
+    istart <- rep(1/n.states, n.states)
+    print(CalcForward(y, A, B, istart)$L)
+    for (i in 1:max.iter) {
+        #print(i)
+        f.res <- CalcForward(y, A, B, istart)
+        aft <- f.res$aft
+        abt <- CalcBackward(y, A, B, f.res$asf)
+
+        nParams <- updateParams(A, B, aft, abt)
+        A <- nParams$A
+        B <- nParams$B
+        print(CalcForward(y, A, B, istart)$L)
     }
 
-    return((list(A=A, B=B, istart=istart)))
+    return(list(A=A, B=B))
 }
 
 UpdateViterbi <- function(v, A, B, yi, s) {
