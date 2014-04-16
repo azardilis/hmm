@@ -22,6 +22,18 @@ MarkovGen <- function(A, istart, N) {
     return(out)
 }
 
+MarkovGen1 <- function(A, istart, N) {
+    stopifnot(nrow(A) == ncol(A), ncol(A) == length(istart))
+    out <- rep(0, N)
+    state.space <- 1:nrow(A)
+    out[1] <- sample(state.space, size=1, prob=istart)
+
+    for (i in 2:N) {
+        out[i] <- sample(state.space, size=1, prob=A[out[i-1], ])
+    }
+
+    return(out)
+}
 
 InferTransProbs <- function(out.states, s, k) {
     #Infer transition probs for state s
