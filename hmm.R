@@ -124,9 +124,7 @@ CalcBackward <- function(y, A, B, asf) {
     colnames(abt) <- as.character(state.space)
 
     b <- rep(1, length(state.space))
-
     abt[length(y), ] <- b
-
     for (i in (length(y)-1):1) {
         b <- sapply(state.space, function(s) {sum(B[, y[i+1]] * A[s, ] * b)})
         b <- b / asf[i+1]
@@ -193,7 +191,7 @@ UpdateParams <- function(A, B, istart, aft, abt) {
     }
 
     istart1 <- istart1 / sum(istart1)
-#    istart1 <- c(0.5, 0.5)
+
     return(list(A=A1, B=B1, istart=istart1))
 }
 
@@ -245,7 +243,8 @@ BaumWelch <- function(y, n.states, n.symb, max.iter, eps) {
 }
 
 Viterbi <- function(y, A, B, istart) {
-    #
+    # y  observations
+    # A, B, istart  HMM
     A <- log(A)
     B <- log(B)
     state.space <- 1:nrow(A)
