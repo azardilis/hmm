@@ -79,47 +79,31 @@ PlotContent <- function(vhs, content) {
            col = 1:(ncol(dat)-1), lty=ltyp)
 }
 
-
-
-UpdateForward <- function(f, A, B, s, yi) {
-    # Updates the forward probability for a state s
-    #
-    # f  forward probs at previous step
-    # A  transition matrix
-    # B  emission probs
-    # s  state that forward is calculated for
-    # y  current emitted symbol
-
-    nf <- B[s, yi] * sum(f * A[, s])
-
-    return(nf)
-}
-
-
 CalcForward <- function(y, A, B, istart) {
-    # y             emitted symbols from an HMM
-    # A, B, istart  HMM model to get likelihood of
+    # y             observations
+    # A, B, istart  HMM
     #
     # Returns:
-    # L             log likelihood of the model
-    # aft           forward probs for all timesteps, all states
+    # L             log likelihood of the model defined by [A, B, istart]
+    # aft           forward variables for all states, all timepoints
+    # asf           scaling factors for all timepoints
+
     state.space <- 1:nrow(A)
     asf <- rep(0, length(y))
     aft <- matrix(rep(0, length(y)*length(state.space)), nrow=length(y))
     colnames(aft) <- state.space
 
-    pf <- istart * B[, y[1]]
-    sf <- sum(pf)
-    pf <- pf / sf
+    f <- istart * B[, y[1]]
+    sf <- sum(f)
+    f <- f / sf
     asf[1] <- sf
-    aft[1, ] <- pf
+    aft[1, ] <- f
     for (i in 2:length(y)) {
-        nf <- sapply(state.space, function(x) {UpdateForward(pf, A, B, x, y[i])})
-        sf <- sum(nf)
+        f <- sapply(state.space, function(s) { B[s, y[i]] * sum(f * A[, s])})
+        sf <- sum(f)
         asf[i] <- sf
-        nf <- nf / sf
-        aft[i, ] <- nf
-        pf <- nf
+        f <- f / sf
+        aft[i, ] <- f
     }
 
     L <- sum(log(asf))
@@ -127,16 +111,10 @@ CalcForward <- function(y, A, B, istart) {
     return(list(aft=aft, asf=asf, L=L))
 }
 
-UpdateBackward <- function(b, A, B, s, yi) {
-    # calculate b_t-1 from b_t which is b argument
-    nb <- sum(B[, yi] * A[s, ] * b)
-
-    return(nb)
-}
-
 CalcBackward <- function(y, A, B, asf) {
     # y  observations
-    # A, B an HMM
+    # A, B HMM
+    # asf  scaling factors from forward calculation
     #
     # Returns:
     # abt  normalised backwards variables for all states all timesteps
@@ -145,16 +123,14 @@ CalcBackward <- function(y, A, B, asf) {
     abt <- matrix(rep(0, length(y)*length(state.space)), nrow=length(y))
     colnames(abt) <- as.character(state.space)
 
-    pb <- rep(1, length(state.space))
-    pb <- pb / sum(pb)
+    b <- rep(1, length(state.space))
 
-    abt[length(y), ] <- pb
+    abt[length(y), ] <- b
 
     for (i in (length(y)-1):1) {
-        nb <- sapply(state.space, function(x) {UpdateBackward(pb, A, B, x, y[i+1])})
-        nb <- nb / asf[i+1]
-        abt[i, ] <- nb
-        pb <- nb
+        b <- sapply(state.space, function(s) {sum(B[, y[i+1]] * A[s, ] * b)})
+        b <- b / asf[i+1]
+        abt[i, ] <- b
     }
 
     return(abt)
@@ -175,7 +151,7 @@ TestLikelihood <- function() {
     return(f.res)
 }
 
-updateParams <- function(A, B, aft, abt) {
+UpdateParams <- function(A, B, istart, aft, abt) {
     n.states <- nrow(A)
     n.symb <- ncol(B)
     A1 <- matrix(rep(0, n.states**2), nrow=n.states)
@@ -208,61 +184,81 @@ updateParams <- function(A, B, aft, abt) {
         }
     }
 
-    return(list(A=A1, B=B1))
+    t <- 1
+    istart1 <- rep(0, n.states)
+    for (i in 1:n.states) {
+        init <- sum(sapply(1:n.states, function(j) {aft[t, i]*B[j, y[t+1]]*A[i, j]*
+                                                           abt[t+2, j]}))
+        istart1[i] <- init / p.seq
+    }
+
+    istart1 <- istart1 / sum(istart1)
+#    istart1 <- c(0.5, 0.5)
+    return(list(A=A1, B=B1, istart=istart1))
 }
 
-BaumWelch <- function(y, n.states, n.symb, max.iter) {
-    A <- matrix(abs(rnorm(n.states**2, 0.5, 0.2)), nrow=n.states)
+BaumWelch <- function(y, n.states, n.symb, max.iter, eps) {
+    # Infer an HMM parameters from observations
+    #
+    # y             observations
+    # n.states      number of states for the model
+    # n.symb        number of symbols emitted
+    # max.iter      maximum number of iterations
+    # eps
+    #
+    # Returns:
+    # [A, B, istart] inferred HMM from observations
+
+    upt <- 1 / n.states
+    upe <- 1 / n.symb
+    s <- 0.2
+    n.iter <- 0
+    A <- matrix(abs(rnorm(n.states**2, upt, s)), nrow=n.states)
     A <- A / rowSums(A)
 
-    B <- matrix(abs(rnorm(n.symb*n.states, 0.2, 0.2)), nrow=n.states)
+    B <- matrix(abs(rnorm(n.symb*n.states, upe, s)), nrow=n.states)
     B <- B / rowSums(B)
 
     istart <- rep(1/n.states, n.states)
-    print(CalcForward(y, A, B, istart)$L)
-    for (i in 1:max.iter) {
-        #print(i)
+    L0 <- 0
+    L1 <- CalcForward(y, A, B, istart)$L
+    dL <- abs(L1 - L0)
+    print(L1)
+    while(n.iter < max.iter &&
+          dL > eps) {
+        L0 <- L1
         f.res <- CalcForward(y, A, B, istart)
         aft <- f.res$aft
         abt <- CalcBackward(y, A, B, f.res$asf)
 
-        nParams <- updateParams(A, B, aft, abt)
+        nParams <- UpdateParams(A, B, istart, aft, abt)
         A <- nParams$A
         B <- nParams$B
-        print(CalcForward(y, A, B, istart)$L)
+        istart <- nParams$istart
+        L1 <- CalcForward(y, A, B, istart)$L
+        print(L1)
+        dL <- abs(L1 - L0)
+        n.iter <- n.iter + 1
     }
 
-    return(list(A=A, B=B))
-}
-
-UpdateViterbi <- function(v, A, B, yi, s) {
-    nv <- B[s, yi] + max(v + A[, s])
-
-    return(nv)
-}
-
-FindMaxState <- function(v, A, s) {
-    i <- which.max(v + A[, s])
-
-    return(i)
+    return(list(A=A, B=B, istart=istart))
 }
 
 Viterbi <- function(y, A, B, istart) {
+    #
     A <- log(A)
     B <- log(B)
     state.space <- 1:nrow(A)
     ani <- matrix(rep(0, length(state.space)*length(y)), nrow=length(state.space))
-    pv <- rep(1, length(state.space))
+    v <- rep(1, length(state.space))
 
     for (i in 1:length(y)) {
-        nv <- sapply(state.space, function(x) {UpdateViterbi(pv, A, B, y[i], x)})
-        ni <- sapply(state.space, function(x) {FindMaxState(pv, A, x)})
+        v <- sapply(state.space, function(s) { B[s, y[i]] + max(v + A[, s]) })
+        ni <- sapply(state.space, function(s) { which.max(v + A[, s]) })
         ani[, i] <- ni
-        pv <- nv
     }
 
-
-    ki <- which.max(nv)
+    ki <- which.max(v)
     hs <- rep(0, length(y))
     hs[length(y)] <- ki
 
