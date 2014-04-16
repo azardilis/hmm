@@ -1,14 +1,5 @@
 from __future__ import division
-
-def read_windows(fin, ws):
-    while True:
-        s = fin.read(ws)
-        if not s: break
-
-        window = s.strip()
-        window = window.replace("\n", "")
-
-        yield window
+from functools import partial
 
 def calc_gc_content(window):
     c_count = window.count('C')
@@ -18,9 +9,12 @@ def calc_gc_content(window):
     return((c_count+g_count) / L)
 
 def find_gc_content(fin):
+    w_size = 100
     gc_content = []
     fin.readline()
-    for window in read_windows(fin, 100):
+    for window in iter(partial(fin.read, w_size), ''):
+        window.strip()
+        window.replace("\n", "")
         gc = calc_gc_content(window)
         gc_content.append(gc)
 
@@ -34,7 +28,7 @@ def write_to_file(gc_content, fout_name):
 
 def main():
     fin_name = "data/Saccharomyces_cerevisiae.R64-1-1.75.dna_rm.chromosome.III.fa"
-    fout_name = "data/cg.dat"
+    fout_name = "data/cg1.dat"
 
     with open(fin_name) as fin:
         gc_content = find_gc_content(fin)
