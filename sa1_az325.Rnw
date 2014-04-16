@@ -15,8 +15,7 @@
 
 
 <<env, echo=FALSE, results='hide', message=FALSE, cache=FALSE>>=
-set.seed(0)
-setwd("../src")
+set.seed(1)
 read_chunk('hmm.R')
 read_chunk('markov.R')
 opts_chunk$set(fig.align = 'center',
@@ -31,8 +30,7 @@ opts_chunk$set(fig.align = 'center',
 @
 
 \begin{figure}[!ht]
-<<markovTest, echo=FALSE, fig.height=5, gif.width=5>>=
-print(getwd())
+<<markovTest, echo=FALSE, fig.height=5, fig.width=5>>=
 out.states <- MarkovTest()
 plot(out.states)
 @
