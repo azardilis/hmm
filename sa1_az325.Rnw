@@ -3,8 +3,43 @@
 \usepackage{amsmath}
 \usepackage{amsthm}
 \usepackage{fullpage}
+\usepackage{listings}
 \usepackage{subcaption}
 \usepackage{hyperref}
+
+
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{gray}{rgb}{0.5,0.5,0.5}
+\definecolor{mauve}{rgb}{0.58,0,0.82}
+
+\lstset{ %
+  language=python,                % the language of the code
+  basicstyle=\footnotesize,           % the size of the fonts that are used for the code
+  numbers=left,                   % where to put the line-numbers
+  numberstyle=\tiny\color{gray},  % the style that is used for the line-numbers
+  stepnumber=2,                   % the step between two line-numbers. If it's 1, each line
+                                  % will be numbered
+  numbersep=5pt,                  % how far the line-numbers are from the code
+  backgroundcolor=\color{white},      % choose the background color. You must add \usepackage{color}
+  showspaces=false,               % show spaces adding particular underscores
+  showstringspaces=false,         % underline spaces within strings
+  showtabs=false,                 % show tabs within strings adding particular underscores
+  frame=single,                   % adds a frame around the code
+  rulecolor=\color{black},        % if not set, the frame-color may be changed on line-breaks within not-black text (e.g. comments (green here))
+  tabsize=2,                      % sets default tabsize to 2 spaces
+  captionpos=b,                   % sets the caption-position to bottom
+  breaklines=true,                % sets automatic line breaking
+  breakatwhitespace=false,        % sets if automatic breaks should only happen at whitespace
+  title=\lstname,                   % show the filename of files included with \lstinputlisting;
+                                  % also try caption instead of title
+  keywordstyle=\color{blue},          % keyword style
+  commentstyle=\color{dkgreen},       % comment style
+  stringstyle=\color{mauve},         % string literal style
+  escapeinside={\%*}{*)},            % if you want to add LaTeX within your code
+  morekeywords={*,...},              % if you want to add more keywords to the set
+  deletekeywords={...}              % if you want to delete keywords from the given language
+}
+
 
 \author{Argyris Zardilis\\ \texttt{az325@cam.ac.uk}}
 \title{Population Genetic Analyses of Genomic Data: Assignment 1}
@@ -16,8 +51,10 @@
 
 <<env, echo=FALSE, results='hide', message=FALSE, cache=FALSE>>=
 set.seed(1)
+library(deSolve)
 read_chunk('hmm.R')
 read_chunk('markov.R')
+read_chunk('gc.R')
 opts_chunk$set(fig.align = 'center',
                tidy = FALSE)
 @
@@ -25,20 +62,186 @@ opts_chunk$set(fig.align = 'center',
 \nocite{*}
 
 \maketitle
-
+\section{Markov Chain model}
+\subsection{Implementation}
 <<MarkovGen>>=
 @
+The function \texttt{MarkovGen} first reads the transition matrix $A$,
+and the initial distribution to construct the model and
+then passes that to the \texttt{MarkovChain} function which outputs $N$
+elements of the Markov Chain specified by the model.
 
-\begin{figure}[!ht]
-<<markovTest, echo=FALSE, fig.height=5, fig.width=5>>=
-out.states <- MarkovTest()
-plot(out.states)
+\subsection{Parameter Inference}
+<<Inference>>=
 @
 
-\caption{States output by the Markov chain model with parameters}
-\label{fig:markovOut}
+The function \texttt{InferModel} reads the output states of Markov
+Chain from a file and then does a maximum likelihood inference for the
+parameters of the model that generated those output states.
+
+\section{Hidden Markov Model}
+\subsection{Implementation}
+<<HMM>>=
+@
+The function \texttt{HMMGen} first calls the \texttt{MarkovChain}(see
+above) to generate the hidden states and then the supplied
+\texttt{emit} function on the hidden states to generate the emitted
+states of the model. The \texttt{HMMGen} function was tested with the
+following parameters:
+\[
+\mathbf{A}=
+  \begin{pmatrix}
+    0.8 & 0.2\\
+    0.1 & 0.9
+  \end{pmatrix}
+\mathbf{B} = \begin{pmatrix}
+  0.2 & 0.5 & 0.2 & 0.1 & 0 \\
+  0   & 0.1 & 0.4 & 0.4 & 0.1
+  \end{pmatrix}
+\mu^0 = \begin{pmatrix}
+  0.5 & 0.5
+  \end{pmatrix}
+\]
+where $\mathbf{A}$ is the transition matrix, $\mathbf{B}$ the emission
+matrix, and $\mu^0$ the initial distribution:
+<<HMMTest>>=
+N <- 115
+A <- matrix(c(0.8, 0.2, 0.1, 0.9), nrow=2, byrow=TRUE)
+B <- matrix(c(0.2, 0.5, 0.2, 0.1, 0.0,
+              0.0, 0.1, 0.4, 0.4, 0.1), nrow=2, byrow=TRUE)
+istart <- c(0.5, 0.5)
+
+out <- HMMGen(A, Emit(B), istart, N)
+@
+The hidden and emitted
+states outputed can be seen in Figure \ref{fig:hmmStatePlot}.
+
+\begin{figure}[!ht]
+<<HMMTestPlot, fig.width=5, fig.height=5>>=
+PlotOut(out)
+@
+\caption{Hidden an emitted states from a HMM.}
+\label{fig:hmmStatePlot}
 \end{figure}
+
+\subsection{Forward Algorithm}
+<<ForwardAlg>>=
+@
+
+The \texttt{CalcForard} function is an implementation of the forward
+variable for HMMs, $f_i(t)$, which is defined recursively as:
+\begin{equation}
+f_{t+1}(i) = B_{Y_{t+1}j}\sum_{j} f_t(j)A_{ij}
+\end{equation}
+where B is the emission matrix, A the transition matrix and $f_t(i)$
+the forward variable for state $i$ at time $t$. Because of the
+underflow problems caused by the repeated multiplications of the
+probabilities involved in the calculation of the forward variables
+over time the forward variables are scaled at each step so that
+$\sum_{i} f_t(i) = 1$. The function returns the calculated forward
+variable for all states at all time points as a $T \times K$ matrix
+where $K$ are the number of states and $T$ the time period. It also
+returns the likelihood of the model, $L$, and the scaling factors used
+along the way, a $T \times 1$ vector, so that they can be used in
+subsequent calculations of the backward variable.
+
+
+
+The \texttt{GC} content of 100-base windows in the chromosome III of
+the yeast genome was discretised and assigned a value from 1 to 5
+giving the observations vector $\{cg_i\}_{i=1}^L | cg_i \in \{1, 2, 3,
+  4, 5\}$ where $L$ is the number of 100-base length windows in the
+sequence of the chromosome. The likelihood of the 2-state HMM with
+emission space $\{1, 2, 3, 4, 5\}$ and parameters(transition and
+emission matrices) as before is:
+<<SeqLikelihood>>=
+obs <- as.matrix(read.table("data/dsCG.dat"))
+obs <- as.vector(obs)
+f.res <- CalcForward(obs, A, B, istart)
+f.res$L
+@
+The code for the discretisation procedure is given in the appendices.
+
+\subsection{Parameter Inference}
+<<BaumWelch>>=
+@
+The function \texttt{BaumWelch} is an implementation of the
+Expectation-Maximisation Baum-Welch algorithm for parameter inference
+in HMMs. It is an iterative algorithm and the update of the parameters
+at each iteration is in the \texttt{UpdateParams} function. The
+\texttt{CalcBackward} function is an implementation of the backwards
+variable for HMMs used in the forward-backward calculation needed for
+the Baum-Welch algorithm. Using the implemented algorithm I tried to
+infer the parameters, transition matrix, emission matrix, and initial
+distribution,  for a 2-state
+HMM with emission space $\{1, 2, 3, 4, 5\}$ for the observations of
+\texttt{CG}-content in 100-base length windows of chromosome III of
+the yeast genome. The parameters returned from the algorithm are:
+
+<<BWTest, cache=TRUE>>=
+bres <- BaumWelch(obs, n.states=2, n.symb=5, max.iter=100, eps=0.1)
+print(bres)
+@
+
+With these new parameters the likelihood of the model is:
+<<LikelihoodBWParams>>=
+print(CalcForward(obs, bres$A, bres$B, bres$istart)$L)
+@
+
+\subsection{Hidden state path decoding}
+<<Viterbi>>=
+@
+
+The \texttt{Viterbi} function is an implementation of the Viterbi
+algorithm for HMMs that given a model and a sequence of observations
+returns the most likely path of hidden states that produced the
+observations. This time, to face the underflow problem, all the
+calculations are in log-space.
+With the parameters inferred above the most likely sequence of hidden
+states for the observations along with the corresponding
+\texttt{CG}-content at that window can be seen in Figure \ref{fig:hsContent}.
+
+\begin{figure}[!ht]
+<<hsContent, echo=FALSE,  fig.width=5, fig.height=5>>=
+PlotContent <- function(vhs, cg) {
+    T <- 1:length(cg)
+    dat <- as.matrix(cbind(hs, cg))
+
+    ltyp <- rep("solid", ncol(dat)-1)
+    matplot(T, dat, type='l', ylab='State index/CG content',
+            xlab = 'Window', lwd=2, lty = ltyp, ylim=c(0, 3))
+
+    legend("topright", c("Hidden States", "GC content(%)"),
+           col = 1:(ncol(dat)), lty=ltyp)
+}
+
+f <- "data/cg.dat"
+cg.cont <- as.vector(as.matrix(read.table(f)))
+hs <- Viterbi(obs, bres$A, bres$B, bres$istart)
+PlotContent(hs, cg.cont)
+@
+\caption{In black hidden states corresponding to the most likely path for the
+  2-state HMM with parameters inferred with Baum-Welch for
+  \texttt{CG}-content observations from the yeast genome(chromosome
+  III). In red the \texttt{CG}-content corresponding to the hidden
+  state for that window.}
+\label{fig:hsContent}
+\end{figure}
+
+\subsection{Alternative emission functions for CG-content}
+The two-state HMM used above for modelling the \texttt{CG}-content of
+100-base length windows of the yeast genome had a discrete emission
+function described by a $K \times M$ matrix where $K$ is the cardinality
+of the state space and $M$ the cardinality of the emission space.
 
 
 \bibliography{sa1_az325}
+
+\appendix
+\section{CG-content discretisation code}
+<<Discretise, eval=FALSE>>=
+@
+
+\section{CG-content calculation}
+\lstinputlisting{cg.py}
 \end{document}
