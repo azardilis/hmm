@@ -1,63 +1,27 @@
-MakeTrans <- function(cs, A) {
-    pt <- A[cs, ]
-    ns <- which(rmultinom(1, 1, pt) == 1)
-    return(ns)
-}
-
-EmitSymbol <- function(cs, B) {
-    pt <- B[cs, ]
-    y <- which(rmultinom(1, 1, pt) == 1)
-
-    return(y)
-}
-
-HMMGen <- function(A, B, istart, N) {
+## ---- HMM ----
+HMMGen <- function(A, emit, istart, N) {
     # A  transition matrix
-    # B  emission probabilities
+    # emit  a function that given a hidden state outputs a symbol
     # istart  initial distribution
-    # N  number of element of Markov chain to output
+    # N  number of elements to output
 
-    out.es <- rep(0, N)
-    out.hs <- rep(0, N)
-    s <- which(rmultinom(1, 1, istart) == 1)
-    out.hs[1] <- s
-    out.es[1] <- which(rmultinom(1, 1, B[s, ]) == 1)
+    out.hs <- MarkovChain(A, istart, N)
+    out.es <- sapply(out.hs, emit)
 
-    for(i in 2:N) {
-        s <- MakeTrans(s, A)
-        out.hs[i] <- s
-        out.es[i] <- EmitSymbol(s, B)
-    }
-
-    return(list(out.hs=out.hs, out.es=out.es))
+    return(list(hs=out.hs, es=out.es))
 }
 
-ReadModel <- function(trans.f, init.f, emit.f) {
-    A <- read.table(trans.f)
-    istart <- read.table(init.f)
-    B <- read.table(emit.f)
-
-    return(list(A=as.matrix(A), istart=as.matrix(istart),
-                B=as.matrix(B)))
-}
-
-TestHMM <- function() {
-    N <- 115
-    trans.f <- "data/trans_hmm.dat"
-    init.f <- "data/start_hmm.dat"
-    emit.f <- "data/emit.dat"
-    model <- ReadModel(trans.f, init.f, emit.f)
-
-    out <- HMMGen(model$A, model$B, model$istart, N)
-    return(out)
+Emit <- function(B) {
+    return( function(s) {
+        sample(1:ncol(B), size=1, prob=B[s, ])
+    })
 }
 
 PlotOut <- function(out) {
-    # expect a list out containing sequences
-    # of hidden and emitted states from an HMM
-    # run
-    T <- 1:length(out$out.hs)
-    states <- as.matrix(cbind(T, out$out.hs, out$out.es))
+    # Expects out as given by HMMGen
+
+    T <- 1:length(out$hs)
+    states <- as.matrix(cbind(T, out$hs, out$es))
 
     ltyp <- rep("solid", ncol(states)-1)
     matplot(states[, 1], states[, 2:ncol(states)], type='l', ylab='State index',
@@ -67,17 +31,7 @@ PlotOut <- function(out) {
            col = 1:(ncol(states)-1), lty=ltyp)
 }
 
-PlotContent <- function(vhs, content) {
-    T <- 1:length(content)
-    dat <- as.matrix(cbind(hs, cg))
-
-    ltyp <- rep("solid", ncol(dat)-1)
-    matplot(T, dat, type='l', ylab='State index',
-            xlab = 'time', lwd=2, lty = ltyp)
-
-    legend("topright", c("Hidden States", "GC content(%)"),
-           col = 1:(ncol(dat)-1), lty=ltyp)
-}
+## ---- ForwardAlg ----
 
 CalcForward <- function(y, A, B, istart) {
     # y             observations
@@ -111,6 +65,8 @@ CalcForward <- function(y, A, B, istart) {
     return(list(aft=aft, asf=asf, L=L))
 }
 
+# ---- BaumWelch ----
+
 CalcBackward <- function(y, A, B, asf) {
     # y  observations
     # A, B HMM
@@ -134,22 +90,8 @@ CalcBackward <- function(y, A, B, asf) {
     return(abt)
 }
 
-TestLikelihood <- function() {
-    obs <- as.matrix(read.table("data/dsCG.dat"))
-    obs <- as.vector(obs)
 
-    ptrans.f <- "data/trans_hmm.dat"
-    init.f <- "data/start_hmm.dat"
-    emit.f <- "data/emit.dat"
-    model <- ReadModel(trans.f, init.f, emit.f)
-
-    f.res <- CalcForward(obs, model$A, model$B, model$istart)
-    b.res <- CalcBackward(obs, model$A, model$B)
-
-    return(f.res)
-}
-
-UpdateParams <- function(A, B, istart, aft, abt) {
+UpdateParams <- function(A, B, istart, aft, abt, y) {
     n.states <- nrow(A)
     n.symb <- ncol(B)
     A1 <- matrix(rep(0, n.states**2), nrow=n.states)
@@ -157,8 +99,8 @@ UpdateParams <- function(A, B, istart, aft, abt) {
 
     for (i in 1:n.states) {
         for (j in 1:n.states) {
-            r <- sapply(1:(length(y)-2), function(t) {aft[t, i]*B[j, y[t+1]]*A[i, j]*
-                                                          abt[t+2, j] })
+            r <- sapply(1:(length(y)-2), function(t) {aft[t, i]*B[j, y[t+1]]*
+                                                          A[i, j]*abt[t+2, j]})
             A1[i, j] <- sum(r) / p.seq
         }
     }
@@ -169,8 +111,8 @@ UpdateParams <- function(A, B, istart, aft, abt) {
     for (i in 1:n.states) {
         gmi <- rep(0, length(y)-2)
         for (t in 1:(length(y)-2)){
-            gm <- sum(sapply(1:n.states, function(j) {aft[t, i]*B[j, y[t+1]]*A[i, j]*
-                                                          abt[t+2, j]}))
+            gm <- sum(sapply(1:n.states, function(j) {aft[t, i]*B[j, y[t+1]]*
+                                                          A[i, j]*abt[t+2, j]}))
             gmi[t] <- gm
         }
         denom <- sum(gmi)
@@ -185,8 +127,8 @@ UpdateParams <- function(A, B, istart, aft, abt) {
     t <- 1
     istart1 <- rep(0, n.states)
     for (i in 1:n.states) {
-        init <- sum(sapply(1:n.states, function(j) {aft[t, i]*B[j, y[t+1]]*A[i, j]*
-                                                           abt[t+2, j]}))
+        init <- sum(sapply(1:n.states, function(j) {aft[t, i]*B[j, y[t+1]]*
+                                                        A[i, j]*abt[t+2, j]}))
         istart1[i] <- init / p.seq
     }
 
@@ -221,7 +163,6 @@ BaumWelch <- function(y, n.states, n.symb, max.iter, eps) {
     L0 <- 0
     L1 <- CalcForward(y, A, B, istart)$L
     dL <- abs(L1 - L0)
-    print(L1)
     while(n.iter < max.iter &&
           dL > eps) {
         L0 <- L1
@@ -229,12 +170,11 @@ BaumWelch <- function(y, n.states, n.symb, max.iter, eps) {
         aft <- f.res$aft
         abt <- CalcBackward(y, A, B, f.res$asf)
 
-        nParams <- UpdateParams(A, B, istart, aft, abt)
+        nParams <- UpdateParams(A, B, istart, aft, abt, y)
         A <- nParams$A
         B <- nParams$B
         istart <- nParams$istart
         L1 <- CalcForward(y, A, B, istart)$L
-        print(L1)
         dL <- abs(L1 - L0)
         n.iter <- n.iter + 1
     }
@@ -242,6 +182,7 @@ BaumWelch <- function(y, n.states, n.symb, max.iter, eps) {
     return(list(A=A, B=B, istart=istart))
 }
 
+## ---- Viterbi -----
 Viterbi <- function(y, A, B, istart) {
     # y  observations
     # A, B, istart  HMM
@@ -268,5 +209,34 @@ Viterbi <- function(y, A, B, istart) {
 
     return(hs)
 }
+
+## ---- Test ----
+PlotContent <- function(vhs, content) {
+    T <- 1:length(content)
+    dat <- as.matrix(cbind(hs, cg))
+
+    ltyp <- rep("solid", ncol(dat)-1)
+    matplot(T, dat, type='l', ylab='State index/CG content',
+            xlab = 'time', lwd=2, lty = ltyp, ylim=c(0, 3))
+
+    legend("topright", c("Hidden States", "GC content(%)"),
+           col = 1:(ncol(dat)), lty=ltyp)
+}
+
+TestLikelihood <- function() {
+    obs <- as.matrix(read.table("data/dsCG.dat"))
+    obs <- as.vector(obs)
+
+    ptrans.f <- "data/trans_hmm.dat"
+    init.f <- "data/start_hmm.dat"
+    emit.f <- "data/emit.dat"
+    model <- ReadModel(trans.f, init.f, emit.f)
+
+    f.res <- CalcForward(obs, model$A, model$B, model$istart)
+    b.res <- CalcBackward(obs, model$A, model$B)
+
+    return(f.res)
+}
+
 
 
