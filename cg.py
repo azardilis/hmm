@@ -28,7 +28,7 @@ def write_to_file(gc_content, fout_name):
 
 def main():
     fin_name = "data/Saccharomyces_cerevisiae.R64-1-1.75.dna_rm.chromosome.III.fa"
-    fout_name = "data/cg1.dat"
+    fout_name = "data/cg.dat"
 
     with open(fin_name) as fin:
         gc_content = find_gc_content(fin)
