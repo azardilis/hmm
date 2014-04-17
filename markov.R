@@ -1,28 +1,12 @@
 ## ---- MarkovGen ----
-MakeTrans <- function(cs, A) {
-    pt <- A[cs, ]
-    ns <- which(rmultinom(1, 1, pt) == 1)
-    return(ns)
-}
+MarkovChain <- function(A, istart, N) {
+    # Generates N elements of the Markov chain
+    # specified by [A, istart]
+    #
+    # A transition matrix
+    # istart initial distribution
+    # N length of chain
 
-
-MarkovGen <- function(A, istart, N) {
-    # A :transition matrix
-    # istart : initial distribution
-    # N : number of element of Markov chain to output
-
-    out <- rep(0, N)
-    s <- which(rmultinom(1, 1, istart) == 1)
-    out[1] <- s
-    for (i in 2:N) {
-        s <- MakeTrans(s, A)
-        out[i] <- s
-    }
-
-    return(out)
-}
-
-MarkovGen1 <- function(A, istart, N) {
     stopifnot(nrow(A) == ncol(A), ncol(A) == length(istart))
     out <- rep(0, N)
     state.space <- 1:nrow(A)
@@ -35,8 +19,26 @@ MarkovGen1 <- function(A, istart, N) {
     return(out)
 }
 
+ReadModel <- function(trans.f, init.f) {
+    A <- read.table(trans.f)
+    istart <- read.table(init.f)
+
+    return(list(A=as.matrix(A), istart=as.matrix(istart)))
+}
+
+MarkovGen <- function(trans.f, init.f, N) {
+    # trans.f  file containing transition matrix A
+    # init.f   file containing initial distribution istart
+
+    model <- ReadModel(trans.f, init.f)
+    out <- MarkovChain(model$A, model$istart, N)
+
+    return(out)
+}
+
+# ---- Inference ----
 InferTransProbs <- function(out.states, s, k) {
-    #Infer transition probs for state s
+    # Infers transition probs for state s
 
     ni <- out.states[which(out.states == s) + 1]
     pt <- table(ni) / length(ni)
@@ -46,27 +48,25 @@ InferTransProbs <- function(out.states, s, k) {
     return(p)
 }
 
-InferModel <- function(out.states, k) {
-    # out.states: output states from a Markov chain
-    # k : number of states
+InferModel <- function(states.f, k) {
+    # states.f   file containing output states from a Markov chain
+    # k          number of states
+    #
+    # Returns:
+    # [A, istart]  Inferred Markov Chain model
+
+    out.states <- read.table("data/out_states.dat")
     istart <- rep(0.0, k)
     istart[out.states[1]] <- 1.0
 
-    A <- t(sapply(1:k, function(x) {InferTransProbs(out.states, x, k)}))
+    A <- t(sapply(1:k, function(s) {InferTransProbs(out.states, s, k)}))
     colnames(A) <- 1:k
     rownames(A) <- 1:k
 
     return(list(A=A, istart=istart))
 }
 
-ReadModel <- function(trans.f, init.f) {
-    A <- read.table(trans.f)
-    istart <- read.table(init.f)
-
-    return(list(A=as.matrix(A), istart=as.matrix(istart)))
-}
-
-
+#----- Tests -----
 MarkovGenTest <- function() {
     N <- 100
     trans.f <- "data/trans.dat"
